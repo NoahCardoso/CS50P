@@ -4,19 +4,17 @@
 
 import sys
 import csv
+import time
 import requests
-
-#consts
-API_KEY = ""
-DATA={"AMZN": "149.20", "AAPL": "184.25", "MSFT": "370.60", "GOOG": "138.92", "TSLA": "241.08", "IBM": "161.52", "XRX": "16.48", "TXN": "164.60" } #for testing
 
 class Stock:
 
     def __init__(self, name, quantity=0):
         #self.name
         #self.quantity
-        self._name=name
-        self._quantity=float(f"{(quantity):.4f}")
+        self._name = name
+        self._quantity = float(f"{(quantity):.4f}")
+        self._purchase_price = self.current_price
 
     def buy(self, n): #n represents amount in USD
         amount=n/self.price
@@ -38,31 +36,38 @@ class Stock:
         else:
             raise ValueError("")
 
-    #25 request limit per day. Only use if have vaild URL
     @property
     def current_price(self):
-        url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={self.name}&apikey={API_KEY}'
-        response = requests.get(url)
-        data = response.json()
-
-        if "Global Quote" in data:
-            current_cost = data["Global Quote"]
-            if "05. price" in current_cost:
-                return float(current_cost["05. price"])
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{self.name}"
+        for _ in range(5):  # Retry up to 5 times
+            response = requests.get(url)
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    if 'chart' in data and 'result' in data['chart'] and data['chart']['result']:
+                        stock_info = data['chart']['result'][0]['meta']
+                        current_price = stock_info['regularMarketPrice']
+                        print(f"The current price of {self.name} is: ${current_price}")
+                        return current_price
+                    else:
+                        print("Error: Invalid response structure")
+                        return None
+                except (KeyError, IndexError, requests.exceptions.JSONDecodeError) as e:
+                    print(f"Error extracting stock price from response: {e}")
+                    return None
+            elif response.status_code == 429:
+                print("Rate limit exceeded. Retrying in 1 minute...")
+                time.sleep(60)  # Wait for 1 minute before retrying
             else:
-                print("Price not available")
-                raise ValueError
-        else:
-            print("Data not available")
-            raise ValueError
+                print(f"Error: Received status code {response.status_code}")
+                return None
+        print("Failed to retrieve stock price after multiple attempts.")
+        return None
 
     @property
     def price(self):
-        if self.name in DATA:
-            cost=float(DATA[self.name])
-        else:
-            raise ValueError("Data not available")
-        return cost
+        return self._purchase_price
+    
     @property
     def name(self):
         return self._name
@@ -173,9 +178,7 @@ def main():
                 else:
                     print(f"You do not own any {stock.name} stock")
 
-        except ValueError:
-            print("ERROR data not avalible")
-            print("Try again")
+        
         except EOFError:
                 if len(sys.argv)==2:
                     close(sys.argv[1],stocks)
